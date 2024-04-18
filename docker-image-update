@@ -1,0 +1,57 @@
+#!/bin/bash
+
+# Check usage
+if [ "$#" -lt 2 ]; then
+    echo "Usage: $0 [-f] [-d] [-ti] [--add-host <hostname:ip>] <existing container name> <new image>"
+    exit 1
+fi
+
+FORCE=0
+DETACH=""
+INTERACTIVE=""
+ADD_HOSTS=""
+
+while [[ "$#" -gt 2 ]]; do
+    case "$1" in
+        -f) FORCE=1; shift ;;
+        -d) DETACH="-d"; shift ;;
+        -ti) INTERACTIVE="-ti"; shift ;;
+        --add-host) ADD_HOSTS+="--add-host $2 "; shift 2 ;;
+        *) echo "Unknown option: $1"; exit 1 ;;
+    esac
+done
+
+CONTAINER_NAME=$1
+NEW_IMAGE=$2
+
+# extracting existing container's configurations
+CONTAINER_ID=$(docker inspect --format="{{.Id}}" $CONTAINER_NAME)
+NETWORKS=$(docker inspect --format='{{range $networkName, $network := .NetworkSettings.Networks}}{{printf "--network %s " $networkName}}{{if $network.IPAddress}}{{printf "--ip %s " $network.IPAddress}}{{end}}{{end}}' $CONTAINER_NAME)
+VOLUMES=$(docker inspect --format='{{range .Mounts}}{{printf "-v %s:%s " .Source .Destination}}{{end}}' $CONTAINER_NAME)
+PORTS=$(docker inspect --format='{{range $p, $conf := .NetworkSettings.Ports}}{{if $conf}}{{range $conf}}{{printf "-p %s:%s " .HostIp .HostPort}}{{end}}{{end}}{{end}}' $CONTAINER_NAME)
+ENV_VARS=$(docker inspect --format='{{range .Config.Env}}{{printf "-e %q " .}}{{end}}' $CONTAINER_NAME)
+RESTART_POLICY=$(docker inspect --format='{{printf "--restart=%s" .HostConfig.RestartPolicy.Name}}' $CONTAINER_NAME)
+
+# etopping and removing the existing container
+if [ $FORCE -eq 1 ]; then
+    docker rm -f $CONTAINER_NAME
+else
+    docker stop $CONTAINER_NAME♦
+    docker rm $CONTAINER_NAME
+fi
+
+# constructing and executing the new container creation command
+CMD="docker run "
+CMD+="$DETACH "
+CMD+="$INTERACTIVE "
+CMD+="$ADD_HOSTS "
+CMD+="$NETWORKS "
+CMD+="$VOLUMES "
+CMD+="$PORTS "
+CMD+="$ENV_VARS "
+CMD+="$RESTART_POLICY "
+CMD+="--name $CONTAINER_NAME $NEW_IMAGE"
+
+eval $CMD
+
+echo "New container has been created: $CONTAINER_NAME"
